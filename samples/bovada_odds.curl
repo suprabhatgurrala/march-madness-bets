@@ -1,0 +1,20 @@
+curl 'https://www.bovada.lv/services/sports/event/coupon/events/A/description/basketball/college-basketball?marketFilterId=def&preMatchOnly=true&eventsLimit=5000&lnGrp=2&lang=en' \
+  -H 'accept: application/json, text/plain, */*' \
+  -H 'accept-language: en-US,en;q=0.9' \
+  -H 'authorization: Bearer 414bd422-0165-4d46-9d03-a12262e4639a' \
+  -H 'cache-control: no-cache' \
+  -b 'Device-Type=Desktop|false; randMktUserId=6|Thu Apr 23 2026; CookieInformationConsent=%7B%22website_uuid%22%3A%22933dcbf3-c7fa-4c19-8051-43897cdc44b7%22%2C%22timestamp%22%3A%222025-10-26T05%3A28%3A05.269Z%22%2C%22consent_url%22%3A%22https%3A%2F%2Fwww.bovada.lv%2F%3Foverlay%3Dlogin%22%2C%22consent_website%22%3A%22Live%20Environment%20-%20BVD%22%2C%22consent_domain%22%3A%22www.bovada.lv%22%2C%22user_uid%22%3A%22a91148d1-0ecc-4f2d-9a6d-260425e72d96%22%2C%22consents_approved%22%3A%5B%22cookie_cat_necessary%22%2C%22cookie_cat_functional%22%2C%22cookie_cat_statistic%22%2C%22cookie_cat_marketing%22%2C%22cookie_cat_unclassified%22%5D%2C%22consents_denied%22%3A%5B%5D%2C%22user_agent%22%3A%22Mozilla%2F5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29%20AppleWebKit%2F537.36%20%28KHTML%2C%20like%20Gecko%29%20Chrome%2F141.0.0.0%20Safari%2F537.36%22%7D; _hjSessionUser_510373=eyJpZCI6IjQwMThhODA5LTg2YmQtNTU4Ny1iYjc0LWIxN2Y1NWI4N2YwYSIsImNyZWF0ZWQiOjE3NjE0NTY0Nzc0MTcsImV4aXN0aW5nIjp0cnVlfQ==; pixelsink_uid=25c7c905-3ba0-4c6d-badb-d556c9fc012c; blueID=63d7b483-8dbc-47a2-97a0-4c8c621fa11f; _pk_id.7.639d=a017995184504596.1762186585.; bvcusttype=true; VISITED=true; LANG=en; previous_marketing_consent=approved; AB=variant; _hjSession_510373=eyJpZCI6IjNhYmJiM2FjLTFmMjgtNGY2Ni05YWJlLTcwOTVhNGU4ZmY5NyIsImMiOjE3NzM3MTg0NzY1MTksInMiOjAsInIiOjAsInNiIjowLCJzciI6MCwic2UiOjAsImZzIjowLCJzcCI6MH0=; _pk_ses.7.639d=1; TS01890ddd030=011c38c90b60eff9b17bb0f1782d689cc170d5bbf7fb2cc3c47771d786ed270fb6d834166a32490c71ccc769267c5b133166c45480; sid=414bd422-0165-4d46-9d03-a12262e4639a; sessionId=414bd422-0165-4d46-9d03-a12262e4639a; JOINED=true; audiences=3868849ebd9274819f04237dd3edb721; st=US:California; _vid_t=JPpS6Ai5Ve6ns0MwbbBVBH/mp9P7AghPycuEYIKhoNm66QoSfjtvJ49m4CfXMhumZ5XD8faGWAsCKhHf9I6VEg5hIWgXM/pihfFtksE=; ln_grp=2; odds_format=AMERICAN; variant=v:1|lgn:1|dt:d|os:w|cntry:US|cur:USD|jn:1|rt:o|pb:0; JSESSIONID=E5B27E391C98B5DA5671EF5443E61F90; TS01890ddd=014b5d5d07e60d89ec9bff6631a32ed71494bb5cdb0f544778f3802e8944d6df861d2f1fe07dd35f3405abdc8668c36432ee0f5e88d76e416fe69a86e114b2eadd86700a5fecd4e5ca11e9e5bc8653aef81da1cf201360ada5013157da12b9e045a90a00af400e184e1655029aa5c552e085f6c9b2' \
+  -H 'pragma: no-cache' \
+  -H 'priority: u=1, i' \
+  -H 'referer: https://www.bovada.lv/sports/basketball/college-basketball' \
+  -H 'sec-ch-ua: "Chromium";v="146", "Not-A.Brand";v="24", "Brave";v="146"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"' \
+  -H 'sec-fetch-dest: empty' \
+  -H 'sec-fetch-mode: cors' \
+  -H 'sec-fetch-site: same-origin' \
+  -H 'sec-gpc: 1' \
+  -H 'traceparent: 00-c8b8cc0a83daffe6a7036078b0dc7b9a-f37464035690000e-00' \
+  -H 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36' \
+  -H 'x-channel: desktop' \
+  -H 'x-sport-context: BASK'

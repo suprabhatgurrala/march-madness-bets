@@ -1,0 +1,23 @@
+curl 'https://services.bovada.lv/services/sports/bet/betslip/maxStake' \
+  -H 'accept: application/json, text/plain, */*' \
+  -H 'accept-language: en-US,en;q=0.9' \
+  -H 'authorization: Bearer <token>' \
+  -H 'cache-control: no-cache' \
+  -H 'content-type: application/json' \
+  -b 'Device-Type=Desktop|false; _hjSessionUser_510373=<session>; blueID=63d7b483-8dbc-47a2-97a0-4c8c621fa11f; VISITED=true; LANG=en; _hjSession_510373=<session>; TS01890ddd030=<session>; sid=<session>; sessionId=<session>; JOINED=true; audiences=3868849ebd9274819f04237dd3edb721; ln_grp=2; odds_format=AMERICAN; variant=v:1|lgn:1|dt:d|os:w|cntry:US|cur:USD|jn:1|rt:o|pb:0; JSESSIONID=<session>; TS01890ddd=<session>' \
+  -H 'origin: https://services.bovada.lv' \
+  -H 'pragma: no-cache' \
+  -H 'priority: u=1, i' \
+  -H 'referer: https://services.bovada.lv/' \
+  -H 'sec-ch-ua: "Chromium";v="146", "Not-A.Brand";v="24", "Brave";v="146"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"' \
+  -H 'sec-fetch-dest: empty' \
+  -H 'sec-fetch-mode: same-origin' \
+  -H 'sec-fetch-site: same-origin' \
+  -H 'sec-gpc: 1' \
+  -H 'traceid: bfc6ddd8-4726-4c9f-b2c1-2954a3101a96' \
+  -H 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36' \
+  -H 'x-channel: desktop' \
+  -H 'x-session-id: Bearer 414bd422-0165-4d46-9d03-a12262e4639a' \
+  --data-raw '{"device":"DESKTOP","channel":"WEB_BS","selections":{"selection":[{"outcomeId":"2227714480","id":0,"system":"A","priceId":"32710893912","oddsFormat":"AMERICAN"}]},"groups":{"group":[{"id":0,"type":"STRAIGHT","groupSelections":[{"groupSelection":[{"selectionId":0,"order":0,"isBanker":false}]}]}]},"bets":{"bet":[{"betGroups":{"groupId":[0]},"betType":"SINGLE","isBox":false,"oddsFormat":"AMERICAN","specifyingRisk":true,"stakePerLine":0,"potentialWin":0}]}}'
