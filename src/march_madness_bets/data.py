@@ -368,14 +368,13 @@ def get_combined_data(include_alt_spreads=True):
     silver_df = get_silver_predictions()
 
     unmapped_pinnacle = set(bovada_df.team) - set(pinnacle_df.team)
-    assert len(unmapped_pinnacle) == 0, (
-        f"Bovada names not found in Pinnacle data: {unmapped_pinnacle}"
-    )
+
+    if len(unmapped_pinnacle) > 0:
+        print(f"WARNING - Bovada names not found in Pinnacle data: {unmapped_pinnacle}")
 
     unmapped_silver = set(bovada_df.team) - set(silver_df.team)
-    assert len(unmapped_silver) == 0, (
-        f"Bovada names not found in Silver data: {unmapped_silver}"
-    )
+    if len(unmapped_silver) > 0:
+        print(f"WARNING - Bovada names not found in Silver data: {unmapped_silver}")
 
     bovada_df = bovada_df.merge(
         pinnacle_df,
@@ -420,8 +419,7 @@ def get_combined_data(include_alt_spreads=True):
         (1 - bovada_df["prob_silver"]) / (bovada_df["odds"] - 1)
     )
 
-    bovada_df.index = pd.factorize(bovada_df["event_name"])[0]
-    bovada_df.index.name = "game_id"
+    bovada_df["game_id"] = pd.factorize(bovada_df["event_name"])[0]
 
     return bovada_df
 
@@ -447,6 +445,4 @@ def compute_log_ev(df: pd.DataFrame, bankroll=10000, max_bet_frac=0.2):
     df["log_ev"] = prob * np.log(bankroll + wager_amt * net_odds) + not_prob * np.log(
         bankroll - wager_amt
     )
-
-    df["potential_profit_frac"] = (df["odds"] - 1) * wager_amt / bankroll
     return df
