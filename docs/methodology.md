@@ -4,108 +4,69 @@ This document describes each step the optimizer takes from raw data to recommend
 
 ---
 
-## 1. Fetch Bovada odds
+## 1. Pull Bovada odds
 
-`data.get_bovada_odds()` hits Bovada's college basketball REST endpoint (no auth required). The response is filtered to `competitionId="23110"` (NCAA Tournament). For each game, moneyline and point spread markets from the "Game Lines" and "Alternate Lines" display groups are extracted. Each outcome is normalized into a row with:
-
-- `team`, `type` (ML / Spread / Alt Spread), `spread_val`, `odds` (decimal), `event_time`
-
-Alt spreads are included or excluded based on the `include_alt_spreads` flag.
+Bovada is the book we are betting into. We pull live moneyline and point spread odds for all NCAA Tournament games, including alternate spread lines if enabled.
 
 ---
 
-## 2. Fetch Pinnacle odds
+## 2. Pull Pinnacle odds
 
-`data.get_pinnacle_odds()` calls Pinnacle's guest API for NCAA league 493, pulling `/matchups` (team names) and `/markets/straight` (prices).
+Pinnacle is a market-making book, meaning they offer low-vig lines that sit very close to the true probability of an event. Other books like Bovada charge higher vig, which skews their implied probabilities away from reality. We use Pinnacle's odds not to bet into, but as a clean probability estimate for each outcome.
 
-`data.parse_pinnacle_odds()` processes the response:
-
-- Only full-game markets (period 0) and moneyline/spread types are kept.
-- **Vig removal**: for each market, each side's implied probability (`1 / decimal_odds`) is divided by the total implied probability across both sides, yielding a vig-free probability `prob_pinnacle`.
-- Team names are remapped via `maps/team_names_pinnacle_to_bovada.json` to match Bovada naming.
+**Vig removal**: Bookmakers pad their odds so that the implied probabilities of both sides sum to more than 100%. To recover unbiased probabilities, we divide each side's implied probability by the total, normalizing them to sum to exactly 1.
 
 ---
 
 ## 3. Load Silver Bulletin predictions
 
-`data.get_silver_predictions()` reads the latest `gamepreds*.csv` from `src/march_madness_bets/predictions/` (sorted lexicographically, last file wins). Each row contains two teams and their win probabilities (`team_a_odds`, `team_b_odds`). The file is unpivoted into one row per team with `type="ML"` and `spread_val=0`.
-
-Team names are remapped via `maps/team_names_silver_to_bovada.json`.
+Silver Bulletin publishes a CSV of moneyline win probabilities for each tournament game, derived from their prediction model. We load the most recent file and treat these probabilities as our model's estimate of each team's true chance of winning.
 
 ---
 
-## 4. Merge sources
+## 4. Combine the sources
 
-`data.merge_sources()` joins all three sources:
+We combine Bovada, Pinnacle, and Silver Bulletin into a single dataset. Only bets that appear on both Bovada and Pinnacle are kept — if a line isn't available on both, we can't compute everything we need.
 
-1. **Bovada ⋈ Pinnacle** on `(team, type, spread_val)` — inner join, so only bets available on both books are kept.
-2. **⋈ Silver** on `(team, type, spread_val)` — left join; Silver only provides ML rows directly.
+**Estimating spread probabilities**: Silver Bulletin only publishes outright win probabilities, not spread cover probabilities. To estimate the probability that a team covers a given spread, we use the following logic: take Pinnacle's spread probability, then shift it by however much Silver disagrees with Pinnacle on the moneyline.
 
-**Spread probability estimation**: Silver Bulletin only publishes moneyline win probabilities. For spread bets, the model probability is estimated as:
+$$P_{\text{Silver, spread}} = P_{\text{Silver, ML}} + (P_{\text{Pinnacle, spread}} - P_{\text{Pinnacle, ML}})$$
 
-```
-prob_silver_spread = prob_silver_ML + (prob_pinnacle_spread - prob_pinnacle_ML)
-```
-
-This assumes that the Silver model's edge over the market is the same shape across the moneyline and spread markets — i.e. it shifts the market-implied spread probability by however much Silver disagrees with the market on the moneyline.
-
-Any Bovada teams not found in Pinnacle or Silver are logged as warnings.
+This assumes Silver's edge over the market is consistent between the moneyline and spread markets.
 
 ---
 
-## 5. Compute Kelly fractions
+## 5. Identify +EV bets
 
-For each bet, the standard Kelly fraction is computed:
+For each bet, we compute the Kelly fraction — a measure of how much edge we have:
 
-```
-kelly = prob_silver - (1 - prob_silver) / (odds - 1)
-```
+$$f = p - \frac{1 - p}{b}$$
 
-A positive Kelly indicates a +EV bet (model probability exceeds the breakeven probability implied by the odds).
+where $p$ is Silver's probability and $b$ is the net decimal odds (i.e. profit per $1 wagered). A positive Kelly fraction means the bet is +EV: our model thinks the true probability is higher than what Bovada is implying.
 
----
-
-## 6. Filter candidate bets
-
-Before running the optimizer, bets are filtered down to a candidate set:
-
-- Only upcoming games (event time > now) on the target date (defaults to the earliest game date available).
-- Spread bets with `|spread_val| < 3.5` are excluded to avoid noise on very tight lines.
-- Only bets with `kelly > 0` are kept.
+Only bets with a positive Kelly fraction are considered. Spread bets on very tight lines (under 3.5 points) are excluded to reduce noise.
 
 ---
 
-## 7. Simultaneous Kelly optimization
+## 6. Optimize the portfolio
 
-`optimizer.multi_kelly_binary()` finds the globally optimal portfolio of bets.
+Computing Kelly fractions independently for each bet ignores two important constraints: we can only bet one side per game, and outcomes across bets are not independent (each game has one result that resolves all bets on it simultaneously).
 
-**The problem**: Kelly fractions computed independently per bet assume the bets are independent. In reality, we can only bet one side per game, and the outcomes are correlated through game results. The optimizer accounts for this.
+The optimizer finds the globally optimal set of bets and wager sizes by:
 
-**Algorithm**:
+1. Enumerating every possible combination of one bet per game (including passing on a game entirely).
+2. For each combination, finding the wager amounts that maximize expected log-wealth across all possible outcomes:
 
-1. Group candidate bets by `game_id`. For each game, enumerate all possible choices (each bet on that game, including "no bet" implicitly via zero wager).
-2. Use `itertools.product` to enumerate every combination of one bet per game — e.g. 3 games with 2 candidates each yields 8 combinations.
-3. For each combination of `m` selected bets:
-   - Enumerate all `2^m` possible outcomes (win/loss for each bet).
-   - Compute the probability of each outcome as the product of per-bet win/loss probabilities.
-   - Use SLSQP (`scipy.optimize.minimize`) to maximize expected log-wealth:
-     ```
-     E[log(wealth)] = sum over outcomes: P(outcome) * log(bankroll + net_pnl(outcome))
-     ```
-   - Wager bounds: `[0, max_bet_frac * bankroll]` per bet; total wagers ≤ bankroll.
-   - Warm-start: initialize from single-bet Kelly fracs × bankroll.
-4. Keep the combination+wager set with the highest `E[log(wealth)]`.
+$$\max_{\mathbf{w}} \sum_{\text{outcomes}} P(\text{outcome}) \cdot \log\!\left(\text{bankroll} + \text{net PnL}(\text{outcome}, \mathbf{w})\right)$$
 
-Bets with an optimal wager of zero are excluded from the final output.
+3. Selecting the combination and wager sizes that produce the highest expected log-wealth.
+
+Maximizing expected log-wealth is the Kelly criterion generalized to a portfolio — it produces the wager sizes that maximize long-run bankroll growth.
 
 ---
 
-## 8. Spread cover rate lookup (offline preprocessing)
+## 7. Spread cover rate lookup (alternate approach, not currently used)
 
-`spread_cover_rate.py` generates `maps/spread_to_cover_win_diff.json`, which maps each spread value to `cover_rate - win_rate`. This is used to adjust moneyline probabilities for spread bets independently of the Pinnacle market adjustment described in step 4.
+An alternative way to estimate spread cover probabilities is via a precomputed lookup table mapping each spread value to the historical difference between ATS cover rate and outright win rate, using NCAA game data since 2003. Rather than borrowing the spread adjustment from Pinnacle's lines (as in step 4), this would derive the adjustment purely from historical data.
 
-Steps:
-1. Scrape historical NCAA ATS results since 2003 from teamrankings.com.
-2. Fit a logistic function to the raw win rate by spread using weighted least squares (weights = game count).
-3. Apply Bayesian smoothing to both cover rate and win rate, regressing toward priors (0.5 for cover rate, logistic fit for win rate) when sample sizes are small (`m=2000`).
-4. Store `cover_rate - win_rate` per spread value as the lookup table.
+Both rates are smoothed using Bayesian shrinkage — spread values with few historical games are pulled toward a prior (50% for cover rate; a fitted logistic curve for win rate) to avoid overfitting sparse data.
