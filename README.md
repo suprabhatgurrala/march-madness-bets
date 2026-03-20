@@ -9,7 +9,7 @@ It pulls live odds from **Bovada** and **Pinnacle**, loads win probability predi
 ### How it works
 
 1. **Odds ingestion** — Live moneyline and spread odds are pulled from Bovada and Pinnacle. Pinnacle's vig-removed implied probabilities serve as the market baseline.
-2. **Prediction model** — Silver Bulletin ML win probabilities are loaded from `src/march_madness_bets/predictions/gamepreds*.csv` (latest file used automatically).
+2. **Prediction model** — Silver Bulletin ML win probabilities are loaded from `src/march_madness_bets/predictions/gamepreds*.csv` (latest file used automatically). **These files are not committed to the repo** — you must download them yourself by subscribing at [natesilver.net](https://www.natesilver.net).
 3. **Edge calculation** — Kelly fraction is computed for each bet where the model probability exceeds the market-implied probability.
 4. **Portfolio optimization** — `multi_kelly_binary` finds the optimal combination of bets (at most one per game) and wager sizes by maximizing expected log-wealth using SLSQP.
 
