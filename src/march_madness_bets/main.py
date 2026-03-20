@@ -123,9 +123,10 @@ def _run_streamlit():
     with st.status(
         "Loading Silver Bulletin predictions…", expanded=False
     ) as silver_status:
-        silver_df = data.get_silver_predictions()
+        silver_df, silver_filename = data.get_silver_predictions()
         silver_status.update(
-            label=f"Silver Bulletin: {len(silver_df)} teams loaded", state="complete"
+            label=f"Silver Bulletin ({silver_filename}): {len(silver_df)} teams loaded",
+            state="complete",
         )
 
     # Step 4 – Merge & filter

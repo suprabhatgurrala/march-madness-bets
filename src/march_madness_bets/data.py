@@ -350,7 +350,7 @@ def get_silver_predictions():
         map_silver_to_bovada = json.load(f)
     df["team"] = df["team"].replace(map_silver_to_bovada)
 
-    return df
+    return df, latest_preds.name
 
 
 def merge_sources(
@@ -424,7 +424,7 @@ def get_combined_data(include_alt_spreads=True):
         get_bovada_odds(include_alt_spreads), competition_id="23110"
     )
     pinnacle_df = parse_pinnacle_odds(*get_pinnacle_odds())
-    silver_df = get_silver_predictions()
+    silver_df, _ = get_silver_predictions()
 
     merged, unmapped_pinnacle, unmapped_silver = merge_sources(
         bovada_df, pinnacle_df, silver_df
