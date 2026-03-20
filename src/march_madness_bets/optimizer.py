@@ -11,6 +11,7 @@ def multi_kelly_binary(
     probs: np.ndarray,
     bankroll: float,
     max_bet_frac: float = 1.0,
+    progress_callback=None,
 ) -> np.ndarray:
     """
     Get optimal wagers for a set of binary bets using Kelly criterion.
@@ -36,7 +37,8 @@ def multi_kelly_binary(
     best_wagers = np.zeros(n)
 
     combos = list(itertools.product(*choices_per_game))
-    for combo in tqdm(combos):
+    total = len(combos)
+    for i, combo in enumerate(tqdm(combos)):
         sel = list(combo)
         m = len(sel)
         p = probs[sel]
@@ -64,5 +66,8 @@ def multi_kelly_binary(
             best_ev = -res.fun
             best_wagers = np.zeros(n)
             best_wagers[sel] = res.x
+
+        if progress_callback is not None:
+            progress_callback((i + 1) / total)
 
     return best_wagers

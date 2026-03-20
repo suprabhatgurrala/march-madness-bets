@@ -351,42 +351,30 @@ def get_silver_predictions():
     return df
 
 
-def get_combined_data(include_alt_spreads=True):
+def merge_sources(
+    bovada_df: pd.DataFrame,
+    pinnacle_df: pd.DataFrame,
+    silver_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, set, set]:
     """
-    Main function to combine data from Bovada, Pinnacle, and Silver Bulliten.
-    Also computes
+    Merge pre-fetched Bovada, Pinnacle, and Silver Bulletin DataFrames.
+    Computes vig-adjusted spread probabilities and Kelly fractions.
 
     Returns:
-        pd.DataFrame: DataFrame with combined data.
+        (merged_df, unmapped_pinnacle, unmapped_silver)
     """
-    bovada_df = parse_bovada_odds(
-        get_bovada_odds(include_alt_spreads), competition_id="23110"
-    )
-
-    pinnacle_df = parse_pinnacle_odds(*get_pinnacle_odds())
-
-    silver_df = get_silver_predictions()
-
     unmapped_pinnacle = set(bovada_df.team) - set(pinnacle_df.team)
-
-    if len(unmapped_pinnacle) > 0:
-        print(f"WARNING - Bovada names not found in Pinnacle data: {unmapped_pinnacle}")
-
     unmapped_silver = set(bovada_df.team) - set(silver_df.team)
-    if len(unmapped_silver) > 0:
-        print(f"WARNING - Bovada names not found in Silver data: {unmapped_silver}")
 
-    bovada_df = bovada_df.merge(
+    merged = bovada_df.merge(
         pinnacle_df,
         on=["team", "type", "spread_val"],
         suffixes=["", "_pinnacle"],
         how="inner",
     )
-    bovada_df = bovada_df.merge(
-        silver_df, on=["team", "type", "spread_val"], how="left"
-    )
+    merged = merged.merge(silver_df, on=["team", "type", "spread_val"], how="left")
 
-    bovada_df = bovada_df[
+    merged = merged[
         [
             "event_time",
             "event_name",
@@ -400,28 +388,52 @@ def get_combined_data(include_alt_spreads=True):
         ]
     ]
 
-    # Build a lookup: for each (event_name, team), get the ML row's prob_pinnacle and prob_silver
-    ml_rows = bovada_df[bovada_df["type"] == "ML"][
+    # For spread rows: prob_silver = prob_silver_ML + (prob_pinnacle_spread - prob_pinnacle_ML)
+    ml_rows = merged[merged["type"] == "ML"][
         ["event_name", "team", "prob_pinnacle", "prob_silver"]
     ]
-    ml_lookup = ml_rows.set_index(["event_name", "team"])
-    # For spread/alt spread rows, compute prob_silver as:
-    #   prob_silver_ML + (prob_pinnacle_spread - prob_pinnacle_ML)
-    spread_mask = bovada_df["type"].isin(["Spread", "Alt Spread"])
-    keys = bovada_df.loc[spread_mask, ["event_name", "team"]].apply(tuple, axis=1)
+    ml_lookup = ml_rows.drop_duplicates(subset=["event_name", "team"]).set_index(
+        ["event_name", "team"]
+    )
+    spread_mask = merged["type"].isin(["Spread", "Alt Spread"])
+    keys = merged.loc[spread_mask, ["event_name", "team"]].apply(tuple, axis=1)
     ml_pinnacle = keys.map(ml_lookup["prob_pinnacle"]).values
     ml_silver = keys.map(ml_lookup["prob_silver"]).values
-    bovada_df.loc[spread_mask, "prob_silver"] = ml_silver + (
-        bovada_df.loc[spread_mask, "prob_pinnacle"].values - ml_pinnacle
+    merged.loc[spread_mask, "prob_silver"] = ml_silver + (
+        merged.loc[spread_mask, "prob_pinnacle"].values - ml_pinnacle
     )
 
-    bovada_df["kelly"] = bovada_df["prob_silver"] - (
-        (1 - bovada_df["prob_silver"]) / (bovada_df["odds"] - 1)
+    merged["kelly"] = merged["prob_silver"] - (
+        (1 - merged["prob_silver"]) / (merged["odds"] - 1)
+    )
+    merged["game_id"] = pd.factorize(merged["event_name"])[0]
+
+    return merged, unmapped_pinnacle, unmapped_silver
+
+
+def get_combined_data(include_alt_spreads=True):
+    """
+    Fetch and merge data from Bovada, Pinnacle, and Silver Bulletin.
+
+    Returns:
+        pd.DataFrame: DataFrame with combined data.
+    """
+    bovada_df = parse_bovada_odds(
+        get_bovada_odds(include_alt_spreads), competition_id="23110"
+    )
+    pinnacle_df = parse_pinnacle_odds(*get_pinnacle_odds())
+    silver_df = get_silver_predictions()
+
+    merged, unmapped_pinnacle, unmapped_silver = merge_sources(
+        bovada_df, pinnacle_df, silver_df
     )
 
-    bovada_df["game_id"] = pd.factorize(bovada_df["event_name"])[0]
+    if unmapped_pinnacle:
+        print(f"WARNING - Bovada names not found in Pinnacle data: {unmapped_pinnacle}")
+    if unmapped_silver:
+        print(f"WARNING - Bovada names not found in Silver data: {unmapped_silver}")
 
-    return bovada_df
+    return merged
 
 
 def compute_log_ev(df: pd.DataFrame, bankroll=10000, max_bet_frac=0.2):
