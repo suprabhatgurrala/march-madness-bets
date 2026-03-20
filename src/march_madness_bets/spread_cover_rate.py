@@ -9,6 +9,7 @@ SPREAD_LOOKUP_PATH = Path(__file__).parent / "maps" / "spread_to_cover_win_diff.
 
 
 def get_spread_to_cover_win_diff():
+    """Load the spread -> (cover rate - win rate) lookup, generating it if not cached."""
     if SPREAD_LOOKUP_PATH.exists():
         spread_to_cover_win_diff = pd.read_json(SPREAD_LOOKUP_PATH, orient="index")[0]
         spread_to_cover_win_diff.index = spread_to_cover_win_diff.index.astype(float)

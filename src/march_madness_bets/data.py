@@ -7,6 +7,7 @@ import requests
 
 
 def get_bovada_odds(include_alt_spreads: bool = False):
+    """Fetch raw odds JSON from Bovada's college basketball endpoint."""
     odds_url = "https://www.bovada.lv/services/sports/event/coupon/events/A/description/basketball/college-basketball"
     params = {
         "preMatchOnly": "true",
@@ -24,6 +25,7 @@ def get_bovada_odds(include_alt_spreads: bool = False):
 
 
 def get_pinnacle_odds() -> pd.DataFrame:
+    """Fetch raw matchups and straight-market odds from Pinnacle (NCAA league 493)."""
     BASE_URL = "https://guest.api.arcadia.pinnacle.com/0.1/leagues/493"
     matchups_response = requests.get(f"{BASE_URL}/matchups")
     matchups_response.raise_for_status()

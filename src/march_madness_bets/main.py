@@ -11,32 +11,27 @@ pd.set_option("display.max_columns", None)
 pd.set_option("display.max_rows", None)
 
 
-def _odds_bucket(odds: float) -> int:
-    if odds > 2.8:
-        return 0
-    elif odds > 2.2:
-        return 1
-    elif odds > 1.8:
-        return 2
-    elif odds > 1.5:
-        return 3
+def _get_candidate_bets(
+    merged_df: pd.DataFrame,
+    bankroll: float,
+    max_bet_frac: float,
+    target_date: date | None,
+) -> pd.DataFrame:
+    """Filter merged data and return positive-kelly candidate bets."""
+    merged_df = merged_df[merged_df["event_time"] > pd.Timestamp.now(tz="US/Pacific")]
+
+    if target_date is not None:
+        merged_df = merged_df[merged_df.event_time.dt.date == target_date]
     else:
-        return 4
+        merged_df = merged_df[
+            merged_df.event_time.dt.date == merged_df.event_time.dt.date.min()
+        ]
 
-
-def _filter_alt_spreads_by_bucket(df: pd.DataFrame) -> pd.DataFrame:
-    """For alt spreads, keep only the highest log_ev bet per (game_id, team, odds bucket)."""
-    alt_mask = df["type"] == "Alt Spread"
-    alt = df[alt_mask].copy()
-    non_alt = df[~alt_mask]
-
-    alt["_bucket"] = alt["odds"].map(_odds_bucket)
-    alt = alt.sort_values("log_ev", ascending=False).drop_duplicates(
-        subset=["game_id", "team", "_bucket"]
-    )
-    alt = alt.drop(columns=["_bucket"])
-
-    return pd.concat([non_alt, alt]).sort_index()
+    merged_df = data.compute_log_ev(merged_df, bankroll=bankroll, max_bet_frac=max_bet_frac)
+    merged_df = merged_df[
+        (merged_df["type"] == "ML") | (merged_df["spread_val"].abs() >= 3.5)
+    ]
+    return merged_df[merged_df["kelly"] > 0].copy()
 
 
 def run(
@@ -58,35 +53,21 @@ def run(
         DataFrame of recommended bets
     """
     merged_df = data.get_combined_data(include_alt_spreads=include_alt_spreads)
-
-    # Filter games that have already started
-    merged_df = merged_df[merged_df["event_time"] > pd.Timestamp.now(tz="US/Pacific")]
-
-    if target_date is not None:
-        merged_df = merged_df[merged_df.event_time.dt.date == target_date]
-    else:
-        # Default to the next day with games
-        merged_df = merged_df[
-            merged_df.event_time.dt.date == merged_df.event_time.dt.date.min()
-        ]
-
-    merged_df = data.compute_log_ev(merged_df, bankroll=bankroll)
-    merged_df = _filter_alt_spreads_by_bucket(merged_df)
-
-    # Filter out obviously unprofitable bets
-    rec_bets = merged_df[merged_df["kelly"] > 0]
+    rec_bets = _get_candidate_bets(merged_df, bankroll, max_bet_frac, target_date)
 
     rec_bets["optimal_wager"] = multi_kelly_binary(
         game_ids=rec_bets.game_id.values,
         odds=rec_bets.odds.values,
         probs=rec_bets.prob_silver.values,
         bankroll=bankroll,
+        max_bet_frac=max_bet_frac,
     )
 
     return rec_bets[rec_bets["optimal_wager"] > 0]
 
 
 def _run_streamlit():
+    """Render the Streamlit UI: sidebar inputs, step-by-step pipeline, and results table."""
     st.set_page_config(page_title="March Madness Optimizer", layout="wide")
     st.title("March Madness Bet Optimizer")
 
@@ -164,21 +145,7 @@ def _run_streamlit():
                     f"Bovada teams not found in Silver Bulletin: {', '.join(sorted(unmapped_silver))}"
                 )
 
-        merged_df = merged_df[
-            merged_df["event_time"] > pd.Timestamp.now(tz="US/Pacific")
-        ]
-        if target_date is not None:
-            merged_df = merged_df[merged_df.event_time.dt.date == target_date]
-        else:
-            merged_df = merged_df[
-                merged_df.event_time.dt.date == merged_df.event_time.dt.date.min()
-            ]
-
-        merged_df = data.compute_log_ev(
-            merged_df, bankroll=bankroll, max_bet_frac=max_bet_frac
-        )
-        merged_df = _filter_alt_spreads_by_bucket(merged_df)
-        rec_bets = merged_df[merged_df["kelly"] > 0].copy()
+        rec_bets = _get_candidate_bets(merged_df, bankroll, max_bet_frac, target_date)
 
         merge_status.update(
             label=f"Merged: {len(rec_bets)} candidate bets across "
@@ -206,6 +173,7 @@ def _run_streamlit():
     opt_progress.empty()
 
     result = rec_bets[rec_bets["optimal_wager"] > 0].copy()
+    result["potential_profit"] = result["optimal_wager"] * (result["odds"] - 1)
 
     # ── Results ───────────────────────────────────────────────────────────────
     st.success(f"Optimizer complete — {len(result)} recommended bet(s)")
@@ -221,11 +189,15 @@ def _run_streamlit():
         "odds",
         "prob_silver",
         "optimal_wager",
+        "potential_profit",
     ]
     display = result[display_cols].copy()
     display["prob_silver"] = display["prob_silver"].map("{:.1%}".format)
     display["odds"] = display["odds"].map("{:.3f}".format)
     display["optimal_wager"] = display["optimal_wager"].map("${:.2f}".format)
+    display["potential_profit"] = (result["potential_profit"] / bankroll).map(
+        "{:.1%}".format
+    )
 
     st.dataframe(display, use_container_width=True, hide_index=True)
 
@@ -262,6 +234,9 @@ elif __name__ == "__main__":
     args = parser.parse_args()
 
     result = run(bankroll=args.bankroll, target_date=args.date)
+    result["potential_profit"] = (
+        result["optimal_wager"] * (result["odds"] - 1) / args.bankroll
+    )
     result = result[
         [
             "event_name",
@@ -271,6 +246,7 @@ elif __name__ == "__main__":
             "prob_silver",
             "kelly",
             "optimal_wager",
+            "potential_profit",
         ]
     ]
     print(result)
