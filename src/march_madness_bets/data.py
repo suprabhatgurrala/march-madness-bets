@@ -12,6 +12,7 @@ def get_bovada_odds(include_alt_spreads: bool = False):
     params = {
         "preMatchOnly": "true",
         "lang": "en",
+        "lnGrp": 2
     }
     if not include_alt_spreads:
         params["marketFilterId"] = "def"
