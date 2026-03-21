@@ -50,11 +50,30 @@ Only bets with a positive Kelly fraction are considered. Spread bets on very tig
 
 ## 6. Optimize the portfolio
 
-Computing Kelly fractions independently for each bet ignores two important constraints: we can only bet one side per game, and outcomes across bets are not independent (each game has one result that resolves all bets on it simultaneously).
+Once we have a list of profitable bets, we need to figure out how much to bet on each. We may also have multiple profitable bets on the same game (e.g. moneyline and spread), so we need to choose the best bet for each game.
+We want to compute the Kelly fractions on the set of bets we plan to make so that we don't overspend our bankroll, which might happen if we just bet the individual Kelly fractions for each bet.
+We can extend the single bet Kelly fraction formula to a set of bets by solving the following optimization problem:
+
+$$\max_{\mathbf{w}} \sum_{\text{outcomes}} P(\text{outcome}) \cdot \log\!\left(\text{bankroll} + \text{net PnL}(\text{outcome}, \mathbf{w})\right)$$
+
+where $\mathbf{w}$ is the vector of wager amounts, $P(\text{outcome})$ is the probability of each outcome, and $\text{net PnL}(\text{outcome}, \mathbf{w})$ is the net profit or loss for each outcome given the wager amounts.
+
+This often leads to significantly different wager amounts than just betting the individual Kelly fractions for each bet.
+So in order to choose the best bet for a game, we iterate through all possible combinations of bets and see which combination gives us the highest expected log-wealth.
+
+For example, if we have 5 candidate bets across 3 games: Team A ML, Team A Spread, Team B ML, Team B Spread, and Team C ML we would consider the following combinations:
+
+| Game 1 | Game 2 | Game 3 |
+|--------|--------|--------|
+| Team A ML | Team B ML | Team C ML |
+| Team A ML | Team B Spread | Team C ML |
+| Team A Spread | Team B ML | Team C ML |
+| Team A Spread | Team B Spread | Team C ML |
+
 
 The optimizer finds the globally optimal set of bets and wager sizes by:
 
-1. Enumerating every possible combination of one bet per game (including passing on a game entirely).
+1. Enumerating every possible combination of one bet per game.
 2. For each combination, finding the wager amounts that maximize expected log-wealth across all possible outcomes:
 
 $$\max_{\mathbf{w}} \sum_{\text{outcomes}} P(\text{outcome}) \cdot \log\!\left(\text{bankroll} + \text{net PnL}(\text{outcome}, \mathbf{w})\right)$$
