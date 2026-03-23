@@ -66,10 +66,72 @@ def run(
     return rec_bets[rec_bets["optimal_wager"] > 0]
 
 
+def _run_optimizer_step(
+    rec_bets: pd.DataFrame,
+    bankroll: float,
+    max_bet_frac: float,
+    progress_callback=None,
+) -> pd.DataFrame:
+    """Run the Kelly optimizer and return the result DataFrame with optimal_wager > 0."""
+    rec_bets = rec_bets.copy()
+    rec_bets["optimal_wager"] = multi_kelly_binary(
+        game_ids=rec_bets.game_id.values,
+        odds=rec_bets.odds.values,
+        probs=rec_bets.prob_silver.values,
+        bankroll=bankroll,
+        max_bet_frac=max_bet_frac,
+        progress_callback=progress_callback,
+    )
+    result = rec_bets[rec_bets["optimal_wager"] > 0].copy()
+    result["potential_profit"] = result["optimal_wager"] * (result["odds"] - 1)
+    return result
+
+
+def _render_results(result: pd.DataFrame, bankroll: float, editor_key: str):
+    """Render the results data_editor and return the edited DataFrame."""
+    display_cols = [
+        "event_name",
+        "bet_name",
+        "type",
+        "odds",
+        "prob_silver",
+        "optimal_wager",
+        "potential_profit",
+    ]
+    display = result[display_cols].copy()
+    display.insert(0, "exclude", False)
+    display["prob_silver"] = display["prob_silver"].map("{:.1%}".format)
+    display["odds"] = display["odds"].map("{:.3f}".format)
+    display["optimal_wager"] = display["optimal_wager"].apply(
+        lambda w: f"${w:.2f} ({w / bankroll:.1%})"
+    )
+    display["potential_profit"] = (result["potential_profit"] / bankroll).map(
+        "{:.1%}".format
+    )
+
+    edited = st.data_editor(
+        display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "exclude": st.column_config.CheckboxColumn("Exclude", default=False)
+        },
+        key=editor_key,
+    )
+    return edited
+
+
 def _run_streamlit():
     """Render the Streamlit UI: sidebar inputs, step-by-step pipeline, and results table."""
     st.set_page_config(page_title="March Madness Optimizer", layout="wide")
     st.title("March Madness Bet Optimizer")
+
+    # ── Session state init ────────────────────────────────────────────────────
+    for key in ("rec_bets", "opt_result", "opt_bankroll", "opt_max_bet_frac", "editor_version"):
+        if key not in st.session_state:
+            st.session_state[key] = None
+    if st.session_state.editor_version is None:
+        st.session_state.editor_version = 0
 
     # ── Sidebar inputs ───────────────────────────────────────────────────────
     with st.sidebar:
@@ -94,113 +156,104 @@ def _run_streamlit():
 
         run_btn = st.button("Run Optimizer", type="primary", use_container_width=True)
 
-    if not run_btn:
-        st.info("Configure parameters in the sidebar and click **Run Optimizer**.")
-        return
+    # ── Pipeline (only on fresh run) ─────────────────────────────────────────
+    if run_btn:
+        warnings_container = st.container()
 
-    # ── Pipeline ─────────────────────────────────────────────────────────────
-    warnings_container = st.container()
+        # Step 1 – Bovada
+        with st.status("Fetching Bovada odds…", expanded=False) as bovada_status:
+            bovada_raw = data.get_bovada_odds(include_alt_spreads=include_alt_spreads)
+            st.write("Parsing Bovada response…")
+            bovada_df = data.parse_bovada_odds(bovada_raw, competition_id="23110")
+            bovada_status.update(
+                label=f"Bovada: {len(bovada_df)} odds loaded", state="complete"
+            )
 
-    # Step 1 – Bovada
-    with st.status("Fetching Bovada odds…", expanded=False) as bovada_status:
-        bovada_raw = data.get_bovada_odds(include_alt_spreads=include_alt_spreads)
-        st.write("Parsing Bovada response…")
-        bovada_df = data.parse_bovada_odds(bovada_raw, competition_id="23110")
-        bovada_status.update(
-            label=f"Bovada: {len(bovada_df)} odds loaded", state="complete"
+        # Step 2 – Pinnacle
+        with st.status("Fetching Pinnacle odds…", expanded=False) as pin_status:
+            matchups, odds_raw = data.get_pinnacle_odds()
+            st.write("Parsing Pinnacle response…")
+            pinnacle_df = data.parse_pinnacle_odds(matchups, odds_raw)
+            pin_status.update(
+                label=f"Pinnacle: {len(pinnacle_df)} odds loaded", state="complete"
+            )
+
+        # Step 3 – Silver Bulletin
+        with st.status(
+            "Loading Silver Bulletin predictions…", expanded=False
+        ) as silver_status:
+            silver_df, silver_filename = data.get_silver_predictions()
+            silver_status.update(
+                label=f"Silver Bulletin ({silver_filename}): {len(silver_df)} teams loaded",
+                state="complete",
+            )
+
+        # Step 4 – Merge & filter
+        with st.status("Merging data sources…", expanded=False) as merge_status:
+            merged_df, unmapped_pinnacle, unmapped_silver = data.merge_sources(
+                bovada_df, pinnacle_df, silver_df
+            )
+
+            if unmapped_pinnacle:
+                with warnings_container:
+                    st.warning(
+                        f"Bovada teams not found in Pinnacle: {', '.join(sorted(unmapped_pinnacle))}"
+                    )
+            if unmapped_silver:
+                with warnings_container:
+                    st.warning(
+                        f"Bovada teams not found in Silver Bulletin: {', '.join(sorted(unmapped_silver))}"
+                    )
+
+            rec_bets = _get_candidate_bets(merged_df, bankroll, max_bet_frac, target_date)
+
+            merge_status.update(
+                label=f"Merged: {len(rec_bets)} candidate bets across "
+                f"{rec_bets['game_id'].nunique()} games",
+                state="complete",
+            )
+
+        if rec_bets.empty:
+            st.warning("No positive-EV bets found after filtering.")
+            return
+
+        # Step 5 – Optimizer
+        st.subheader("Running simultaneous Kelly optimizer…")
+        opt_progress = st.progress(0.0, text="Evaluating combinations…")
+
+        result = _run_optimizer_step(
+            rec_bets,
+            bankroll,
+            max_bet_frac,
+            progress_callback=lambda frac: opt_progress.progress(frac),
         )
+        opt_progress.empty()
 
-    # Step 2 – Pinnacle
-    with st.status("Fetching Pinnacle odds…", expanded=False) as pin_status:
-        matchups, odds_raw = data.get_pinnacle_odds()
-        st.write("Parsing Pinnacle response…")
-        pinnacle_df = data.parse_pinnacle_odds(matchups, odds_raw)
-        pin_status.update(
-            label=f"Pinnacle: {len(pinnacle_df)} odds loaded", state="complete"
-        )
-
-    # Step 3 – Silver Bulletin
-    with st.status(
-        "Loading Silver Bulletin predictions…", expanded=False
-    ) as silver_status:
-        silver_df, silver_filename = data.get_silver_predictions()
-        silver_status.update(
-            label=f"Silver Bulletin ({silver_filename}): {len(silver_df)} teams loaded",
-            state="complete",
-        )
-
-    # Step 4 – Merge & filter
-    with st.status("Merging data sources…", expanded=False) as merge_status:
-        merged_df, unmapped_pinnacle, unmapped_silver = data.merge_sources(
-            bovada_df, pinnacle_df, silver_df
-        )
-
-        if unmapped_pinnacle:
-            with warnings_container:
-                st.warning(
-                    f"Bovada teams not found in Pinnacle: {', '.join(sorted(unmapped_pinnacle))}"
-                )
-        if unmapped_silver:
-            with warnings_container:
-                st.warning(
-                    f"Bovada teams not found in Silver Bulletin: {', '.join(sorted(unmapped_silver))}"
-                )
-
-        rec_bets = _get_candidate_bets(merged_df, bankroll, max_bet_frac, target_date)
-
-        merge_status.update(
-            label=f"Merged: {len(rec_bets)} candidate bets across "
-            f"{rec_bets['game_id'].nunique()} games",
-            state="complete",
-        )
-
-    if rec_bets.empty:
-        st.warning("No positive-EV bets found after filtering.")
-        return
-
-    # Step 5 – Optimizer
-    st.subheader("Running simultaneous Kelly optimizer…")
-    opt_progress = st.progress(0.0, text="Evaluating combinations…")
-
-    rec_bets["optimal_wager"] = multi_kelly_binary(
-        game_ids=rec_bets.game_id.values,
-        odds=rec_bets.odds.values,
-        probs=rec_bets.prob_silver.values,
-        bankroll=bankroll,
-        max_bet_frac=max_bet_frac,
-        progress_callback=lambda frac: opt_progress.progress(frac),
-    )
-
-    opt_progress.empty()
-
-    result = rec_bets[rec_bets["optimal_wager"] > 0].copy()
-    result["potential_profit"] = result["optimal_wager"] * (result["odds"] - 1)
+        st.session_state.rec_bets = rec_bets
+        st.session_state.opt_result = result
+        st.session_state.opt_bankroll = bankroll
+        st.session_state.opt_max_bet_frac = max_bet_frac
+        st.session_state.editor_version += 1
 
     # ── Results ───────────────────────────────────────────────────────────────
+    if st.session_state.opt_result is None:
+        if not run_btn:
+            st.info("Configure parameters in the sidebar and click **Run Optimizer**.")
+        return
+
+    result = st.session_state.opt_result
+    bankroll = st.session_state.opt_bankroll
+    max_bet_frac = st.session_state.opt_max_bet_frac
+
     st.success(f"Optimizer complete — {len(result)} recommended bet(s)")
 
     if result.empty:
         st.info("Optimizer found no bets worth placing at this bankroll.")
         return
 
-    display_cols = [
-        "event_name",
-        "bet_name",
-        "type",
-        "odds",
-        "prob_silver",
-        "optimal_wager",
-        "potential_profit",
-    ]
-    display = result[display_cols].copy()
-    display["prob_silver"] = display["prob_silver"].map("{:.1%}".format)
-    display["odds"] = display["odds"].map("{:.3f}".format)
-    display["optimal_wager"] = display["optimal_wager"].map("${:.2f}".format)
-    display["potential_profit"] = (result["potential_profit"] / bankroll).map(
-        "{:.1%}".format
+    edited = _render_results(
+        result, bankroll, editor_key=f"result_editor_{st.session_state.editor_version}"
     )
-
-    st.dataframe(display, use_container_width=True, hide_index=True)
 
     total_wagered = result["optimal_wager"].sum()
     st.metric(
@@ -209,8 +262,37 @@ def _run_streamlit():
         f"{total_wagered / bankroll:.1%} of bankroll",
     )
 
+    # ── Re-run with exclusions ────────────────────────────────────────────────
+    n_excluded = edited["exclude"].sum()
+    rerun_btn = st.button(
+        f"Re-run optimizer (excluding {n_excluded} selected bet{'s' if n_excluded != 1 else ''})",
+        disabled=n_excluded == 0,
+    )
+
+    if rerun_btn:
+        excluded_indices = result.index[edited["exclude"].values]
+        excluded_game_ids = result.loc[excluded_indices, "game_id"].unique()
+        remaining = st.session_state.rec_bets[
+            ~st.session_state.rec_bets["game_id"].isin(excluded_game_ids)
+        ]
+
+        if remaining.empty:
+            st.warning("No candidate bets remaining after exclusions.")
+        else:
+            opt_progress = st.progress(0.0, text="Evaluating combinations…")
+            new_result = _run_optimizer_step(
+                remaining,
+                bankroll,
+                max_bet_frac,
+                progress_callback=lambda frac: opt_progress.progress(frac),
+            )
+            opt_progress.empty()
+            st.session_state.opt_result = new_result
+            st.session_state.editor_version += 1
+            st.rerun()
+
     with st.expander("Full dataframe (all candidate bets)"):
-        st.dataframe(rec_bets, use_container_width=True)
+        st.dataframe(st.session_state.rec_bets, use_container_width=True)
 
 
 # ── Entry points ──────────────────────────────────────────────────────────────
