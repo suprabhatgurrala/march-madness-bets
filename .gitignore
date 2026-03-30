@@ -10,3 +10,4 @@ wheels/
 .venv
 
 src/march_madness_bets/predictions/
+config.json

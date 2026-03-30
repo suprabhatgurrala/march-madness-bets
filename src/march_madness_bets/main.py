@@ -121,6 +121,50 @@ def _render_results(result: pd.DataFrame, bankroll: float, editor_key: str):
     return edited
 
 
+def _render_replacements(
+    result: pd.DataFrame, rec_bets: pd.DataFrame, version: int
+) -> dict:
+    """
+    For each game in result that has other candidates in rec_bets, render a selectbox
+    to optionally replace the selected bet with another candidate.
+
+    Returns a dict mapping game_id -> rec_bets index of the replacement bet
+    (only for games where a non-default replacement is chosen).
+    """
+    replacements = {}
+    rows_with_alts = []
+    for _, row in result.iterrows():
+        game_id = row["game_id"]
+        other_candidates = rec_bets[
+            (rec_bets["game_id"] == game_id) & (rec_bets["bet_name"] != row["bet_name"])
+        ]
+        if not other_candidates.empty:
+            rows_with_alts.append((row, other_candidates))
+
+    if not rows_with_alts:
+        return replacements
+
+    st.subheader("Replace selected bets (optional)")
+    for row, other_candidates in rows_with_alts:
+        game_id = row["game_id"]
+        option_labels = ["(keep current)"] + [
+            f"{r['bet_name']}  [{r['prob_silver']:.1%} / {r['odds']:.3f}]"
+            for _, r in other_candidates.iterrows()
+        ]
+        option_indices = [None] + list(other_candidates.index)
+
+        selected_label = st.selectbox(
+            f"{row['event_name']}: **{row['bet_name']}**",
+            options=option_labels,
+            key=f"replace_{game_id}_{version}",
+        )
+        chosen_pos = option_labels.index(selected_label)
+        if chosen_pos != 0:
+            replacements[game_id] = option_indices[chosen_pos]
+
+    return replacements
+
+
 def _run_streamlit():
     """Render the Streamlit UI: sidebar inputs, step-by-step pipeline, and results table."""
     st.set_page_config(page_title="March Madness Optimizer", layout="wide")
@@ -262,19 +306,37 @@ def _run_streamlit():
         f"{total_wagered / bankroll:.1%} of bankroll",
     )
 
-    # ── Re-run with exclusions ────────────────────────────────────────────────
-    n_excluded = edited["exclude"].sum()
-    rerun_btn = st.button(
-        f"Re-run optimizer (excluding {n_excluded} selected bet{'s' if n_excluded != 1 else ''})",
-        disabled=n_excluded == 0,
+    replacements = _render_replacements(
+        result, st.session_state.rec_bets, st.session_state.editor_version
     )
+
+    # ── Re-run with exclusions / replacements ─────────────────────────────────
+    n_excluded = edited["exclude"].sum()
+    n_replaced = len(replacements)
+    changes = []
+    if n_excluded:
+        changes.append(f"excluding {n_excluded} bet{'s' if n_excluded != 1 else ''}")
+    if n_replaced:
+        changes.append(f"replacing {n_replaced} bet{'s' if n_replaced != 1 else ''}")
+    rerun_label = f"Re-run optimizer ({', '.join(changes)})" if changes else "Re-run optimizer"
+    rerun_btn = st.button(rerun_label, disabled=(n_excluded == 0 and n_replaced == 0))
 
     if rerun_btn:
         excluded_indices = result.index[edited["exclude"].values]
-        excluded_game_ids = result.loc[excluded_indices, "game_id"].unique()
-        remaining = st.session_state.rec_bets[
-            ~st.session_state.rec_bets["game_id"].isin(excluded_game_ids)
-        ]
+        excluded_game_ids = set(result.loc[excluded_indices, "game_id"].unique())
+
+        remaining = st.session_state.rec_bets.copy()
+
+        # Remove excluded games entirely
+        remaining = remaining[~remaining["game_id"].isin(excluded_game_ids)]
+
+        # For replacement games: keep only the pinned bet for that game
+        for game_id, pinned_idx in replacements.items():
+            if game_id in excluded_game_ids:
+                continue  # exclude takes precedence
+            other_games_mask = remaining["game_id"] != game_id
+            pinned_row = st.session_state.rec_bets.loc[[pinned_idx]]
+            remaining = pd.concat([remaining[other_games_mask], pinned_row])
 
         if remaining.empty:
             st.warning("No candidate bets remaining after exclusions.")

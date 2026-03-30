@@ -12,12 +12,15 @@ def get_bovada_odds(include_alt_spreads: bool = False):
     params = {
         "preMatchOnly": "true",
         "lang": "en",
-        "lnGrp": 2
+        "lnGrp": 2,
+        "eventsLimit": 5000,
     }
     if not include_alt_spreads:
         params["marketFilterId"] = "def"
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "cache-control": "no-cache",
+        "pragma": "no-cache",
     }
     print("Pulling Bovada odds...")
     odds_raw = requests.get(odds_url, params=params, headers=headers).json()
@@ -319,18 +322,32 @@ def parse_bovada_odds(
 
 def get_silver_predictions():
     """
-    Get the latest Silver Bulliten predictions.
+    Get the latest Silver Bulletin predictions.
+
+    Downloads from the URL specified in config.json (project root), appending a
+    `v` query parameter set to the current Unix timestamp in milliseconds to
+    bust any CDN cache and ensure the latest data is returned.
 
     Returns:
         pd.DataFrame: DataFrame with silver predictions.
     """
-    predictions_path = Path(__file__).parent / "predictions"
+    import time
+    import io
 
-    latest_preds = sorted([*predictions_path.glob("gamepreds*.csv")])[-1]
+    config_path = Path(__file__).parent.parent.parent / "config.json"
+    with open(config_path, "r") as f:
+        config = json.load(f)
 
-    print(f"Using predictions file: {latest_preds.name}")
+    base_url = config["silver_predictions_url"]
+    timestamp_ms = int(time.time() * 1000)
+    sep = "&" if "?" in base_url else "?"
+    url = f"{base_url}{sep}v={timestamp_ms}"
 
-    df = pd.read_csv(latest_preds)
+    print(f"Downloading Silver predictions from: {base_url}")
+    response = requests.get(url)
+    response.raise_for_status()
+
+    df = pd.read_csv(io.StringIO(response.text))
     df = pd.concat(
         [
             df[["full_sb_name_a", "team_a_odds"]].rename(
@@ -351,7 +368,7 @@ def get_silver_predictions():
         map_silver_to_bovada = json.load(f)
     df["team"] = df["team"].replace(map_silver_to_bovada)
 
-    return df, latest_preds.name
+    return df, base_url
 
 
 def merge_sources(
